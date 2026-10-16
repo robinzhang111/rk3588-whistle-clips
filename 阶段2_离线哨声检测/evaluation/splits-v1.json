@@ -1,0 +1,47 @@
+{
+  "version": "bhuman2017-splits-v1",
+  "status": "frozen_before_detector_development",
+  "basis_sha256": "6610e70b4b2f9adef486e84505bd0a25e00c5b32ccbe6091daba36e899a0710b",
+  "splits": {
+    "development": {
+      "groups": [
+        "german_open_2017_tests",
+        "lab_fox40_printed"
+      ],
+      "files": [
+        "WhistleTest_tuhhnao12.wav",
+        "WhistleTest_tuhhnao16.wav",
+        "Lab_Fox40_vs_printed.wav",
+        "TestBHuman_03_05_2017_1413.wav"
+      ],
+      "duration_seconds": 1043.5,
+      "primary_events": 31
+    },
+    "validation": {
+      "groups": [
+        "leipzig_20160429"
+      ],
+      "files": [
+        "HTWK_HULKs_1930_2016_04_29.wav"
+      ],
+      "duration_seconds": 972.0,
+      "primary_events": 6
+    },
+    "test": {
+      "groups": [
+        "iran_open_20170405",
+        "lunited_upenn_20170728"
+      ],
+      "files": [
+        "LUnitedvsUPenn20170728.wav",
+        "LUnitedvsUPenn20170728Half2.wav",
+        "HTWK_Dutch_05_04_2017.wav",
+        "HTWK_Dutch_05_04_2017-2.wav",
+        "SRC_Dutch_05-04-2017.wav"
+      ],
+      "duration_seconds": 2912.8719614512474,
+      "primary_events": 14
+    }
+  },
+  "note": "Conservative grouped holdout; no detector output has been used to select groups"
+}

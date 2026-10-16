@@ -1,0 +1,77 @@
+{
+  "version": "bhuman2017-event-evaluation-v1",
+  "status": "frozen_before_detector_development",
+  "frozen_at_utc": "2026-10-11T05:02:09.240532+00:00",
+  "task": "target-field referee whistle; neighbouring-field whistles are interference",
+  "derived_directory": "data/bhuman2017-prepared-v1",
+  "basis_sha256": {
+    "manifest.json": "7a877bbed8640fd2987133f33b1edd7d9f07acc073c317022aee810351c65aaf",
+    "annotations_seconds.json": "b4bb61d3dfd3f7214920af8a81cfee9601996a4d5452e301295a697869024621",
+    "split_proposal.json": "6610e70b4b2f9adef486e84505bd0a25e00c5b32ccbe6091daba36e899a0710b"
+  },
+  "split_snapshot_sha256": "753388144708163844d54b63c9279ce0ac17019af957b6c50e4d0c1170185e92",
+  "primary_channel_index": 0,
+  "position_unit": "original_sample_frames_per_channel",
+  "interval_convention": "[start,end)",
+  "ground_truth": "valid channel0 publisher start/end labels; no core fields and no automatic anomaly repair",
+  "prediction_required_fields": [
+    "filename",
+    "estimated_start_sample"
+  ],
+  "prediction_optional_fields": [
+    "estimated_end_sample",
+    "decision_sample"
+  ],
+  "prediction_validity": "integer original-sample position, 0 <= estimated_start_sample < file sample_frames",
+  "matching": {
+    "same_file_and_channel": true,
+    "one_to_one": true,
+    "onset_tolerance_seconds": 0.2,
+    "tolerance_native_samples": {
+      "44100": 8820,
+      "48000": 9600
+    },
+    "boundary": "absolute onset error <= tolerance, inclusive",
+    "assignment_objectives": [
+      "maximize matched event count",
+      "minimize sum of absolute onset errors",
+      "deterministic ties by prediction index then label index"
+    ]
+  },
+  "unmatched_predictions": "count every unmatched prediction as FP; do not silently merge during evaluation",
+  "duplicate_definition": "unmatched prediction within onset tolerance of an already matched target; report as duplicate and FP",
+  "detector_event_merge": "part of detector; parameters selected on development/validation, frozen before test",
+  "false_alarm_per_hour_denominator": "sum of full scored file durations in channel0 / 3600; not doubled by stereo",
+  "metrics": [
+    "TP",
+    "FP",
+    "FN",
+    "precision",
+    "recall",
+    "F1",
+    "FP_per_hour",
+    "duplicate_FP",
+    "signed_onset_error_seconds",
+    "absolute_onset_error_seconds",
+    "decision_delay_seconds_if_available",
+    "processing_time_seconds"
+  ],
+  "undefined_metrics": "zero denominator -> null with reason; never substitute 100 percent",
+  "error_scope": "only matched events; report FN alongside onset errors",
+  "decision_delay": "(decision_sample - ground_truth_start_sample) / native_sample_rate; separate from processing wall time",
+  "end_at_eof": "retain valid event for onset evaluation; exclude its end from natural-offset accuracy",
+  "secondary_tolerance_sensitivity_seconds": [
+    0.1,
+    0.5
+  ],
+  "secondary_rule": "same frozen predictions; supplementary only; never replace primary 0.2s result or retune",
+  "reference_whistlelab_protocol": "optional supplementary only, separate from primary onset matching",
+  "absolute_utc_start": null,
+  "acceptance_target": "not established; tolerance is a scoring rule, not measured timestamp precision",
+  "remaining_gates": [
+    "explicit dataset license confirmation",
+    "remaining representative listening"
+  ],
+  "detector_implemented": false,
+  "evaluation_run": false
+}

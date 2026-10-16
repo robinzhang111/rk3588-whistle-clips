@@ -1,0 +1,35 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>篮球检测失败与长事件核查</title>
+<style>body{max-width:1150px;margin:25px auto;padding:0 18px;font:18px system-ui;line-height:1.7}button,select,textarea{font:inherit;margin:7px;padding:7px}audio{width:100%}canvas{width:100%;height:220px;border:1px solid #aaa}textarea{width:95%;height:100px}.note{background:#edf3fa;padding:12px}</style>
+<h1>篮球检测失败与长事件核查</h1>
+<p class="note">FP/FN是当前匹配结果，不预设声音类型。灰色为待核查目标，绿色为人工哨声，橙色为模型候选覆盖；分数曲线蓝色C0、紫色C1、虚线0.65。上下文可能含其他哨声，请报告目标处声音。不同材料会重叠，勿累加整段声数。L是5条长事件，与已有FP/FN可能共用声音。</p>
+<label>材料<select id="case"></select></label><label>声道<select id="channel"></select></label>
+<p id="info"></p><p id="analysis"></p><audio id="audio" controls preload="metadata"></audio><p id="position"></p>
+<canvas id="wave" width="1200" height="240" aria-label="原音轨波形，点击定位"></canvas>
+<canvas id="scores" width="1200" height="240" aria-label="原始窗口分数，点击定位"></canvas>
+<button id="target">播放目标区间（部分上下文）</button><button id="extension">播放人工结束后的延长部分</button>
+<p>两个横轴均为原音轨相对时间。波形按本声道视觉缩放，试听统一系数约0.400066，无额外削波。分数是模型原输入计算所得，未按试听音量重算。声道C1只在双路B06出现，原两路完全相同。</p>
+<p id="labels"></p><p><a id="csv">查看本项逐窗分数CSV</a></p>
+<h2>听辨反馈</h2><p>请写目标处是否有哨声、几次独立吹哨，或像什么声音；L还请描述人工末端之后听到什么。拿不准、声音过小、失真或切片末尾截断可直接说明。</p>
+<textarea id="feedback"></textarea><button id="export">导出听辨反馈</button><p id="message" role="status"></p>
+<script>
+const data=__DATA__,$=id=>document.getElementById(id),audio=$('audio');
+let ci=0,ch=0,position=0,stop=null,feedback={};const key=data.material_id;
+try{feedback=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){$('message').textContent='缓存不可用，请导出保存。'}
+function current(){return data.cases[ci]}
+function x(time){const r=current();return 1200*(time-r.clip_start_seconds)/(r.clip_end_seconds-r.clip_start_seconds)}
+function bands(ctx){const r=current();ctx.fillStyle='#eee';ctx.fillRect(x(r.target_seconds[0]),0,x(r.target_seconds[1])-x(r.target_seconds[0]),210);ctx.fillStyle='#16884a';for(const e of r.nearby_manual_labels)ctx.fillRect(x(e.start_sample/r.rate),212,x(e.end_sample/r.rate)-x(e.start_sample/r.rate),7);ctx.fillStyle='#e89118';for(const e of r.nearby_candidates)ctx.fillRect(x(e.estimated_start_sample/r.rate),222,x(e.estimated_end_sample/r.rate)-x(e.estimated_start_sample/r.rate),7)}
+function axes(ctx){const r=current();for(let i=0;i<=5;i++){ctx.fillStyle='#333';ctx.fillText((r.clip_start_seconds+(r.clip_end_seconds-r.clip_start_seconds)*i/5).toFixed(3)+'s',Math.min(i*240,1130),238)}}
+function draw(){const r=current(),ctx=$('wave').getContext('2d'),s=$('scores').getContext('2d');ctx.clearRect(0,0,1200,240);s.clearRect(0,0,1200,240);bands(ctx);bands(s);const wave=r.envelopes[ch],peak=Math.max(...wave.flat().map(Math.abs),1e-6);ctx.strokeStyle='#3569a8';ctx.beginPath();wave.forEach((v,i)=>{const p=x(r.clip_start_seconds+i*r.envelope_step/r.rate);ctx.moveTo(p,100-90*v[0]/peak);ctx.lineTo(p,100-90*v[1]/peak)});ctx.stroke();for(let c=0;c<r.channels;c++){s.strokeStyle=c===0?'#0066cc':'#aa33aa';s.beginPath();r.score_rows.forEach((v,i)=>{const p=x(v[0]),q=200-180*v[c+1];if(i)s.lineTo(p,q);else s.moveTo(p,q)});s.stroke()}s.strokeStyle='#333';s.setLineDash([6,4]);s.beginPath();s.moveTo(0,200-180*.65);s.lineTo(1200,200-180*.65);s.stroke();s.setLineDash([]);for(const c of [ctx,s]){c.strokeStyle='#cc2222';c.beginPath();c.moveTo(x(r.clip_start_seconds+position),0);c.lineTo(x(r.clip_start_seconds+position),205);c.stroke();axes(c)}$('position').textContent='片段内 '+position.toFixed(3)+'s / 原音轨 '+(r.clip_start_seconds+position).toFixed(3)+'s'}
+function loadAudio(keep){audio.pause();stop=null;position=keep;audio.onloadedmetadata=()=>{audio.currentTime=Math.min(keep,audio.duration);draw()};audio.src=current().audio[ch];draw()}
+function load(){audio.pause();ch=0;position=0;const r=current();$('channel').innerHTML='';for(let c=0;c<r.channels;c++){const o=document.createElement('option');o.value=c;o.textContent='C'+c;$('channel').appendChild(o)}$('info').textContent=r.id+' · '+r.file_id+' · 目标原时间 '+r.target_seconds.map(v=>v.toFixed(3)).join('～')+'s · 目标片段时间 '+r.target_in_clip_seconds.map(v=>v.toFixed(3)).join('～')+'s';$('analysis').textContent=r.objective_analysis;$('feedback').value=feedback[r.id]||'';$('labels').textContent='附近人工哨声：'+r.nearby_manual_labels.map(e=>(e.start_sample/r.rate).toFixed(3)+'～'+(e.end_sample/r.rate).toFixed(3)).join('；');$('csv').href='windows/'+r.id+'.csv';loadAudio(0)}
+data.cases.forEach((r,i)=>{const o=document.createElement('option');o.value=i;o.textContent=r.id+' · '+r.file_id;$('case').appendChild(o)});
+$('case').onchange=()=>{ci=Number($('case').value);load()};$('channel').onchange=()=>{ch=Number($('channel').value);loadAudio(position)};
+for(const id of ['wave','scores'])$(id).onclick=e=>{audio.pause();stop=null;const r=e.target.getBoundingClientRect();position=Math.max(0,Math.min((e.clientX-r.left)/r.width*(current().clip_end_seconds-current().clip_start_seconds),current().clip_end_seconds-current().clip_start_seconds));audio.currentTime=position;draw()};
+audio.ontimeupdate=()=>{position=audio.currentTime;if(stop!==null&&position>=stop){audio.pause();stop=null}draw()};
+function play(a,b){const r=current();audio.currentTime=Math.max(0,a-r.clip_start_seconds);position=audio.currentTime;stop=Math.min(b-r.clip_start_seconds,r.clip_end_seconds-r.clip_start_seconds);audio.play().catch(e=>$('message').textContent=e.message)}
+$('target').onclick=()=>{const r=current();play(r.target_seconds[0]-.1,r.target_seconds[1]+.1)};
+$('extension').onclick=()=>{const r=current();if(!r.prediction||!r.label){$('message').textContent='仅L长事件提供延长部分试听。';return}play(r.label.end_sample/r.rate,r.prediction.estimated_end_sample/r.rate+.1)};
+$('feedback').oninput=()=>{feedback[current().id]=$('feedback').value;try{localStorage.setItem(key,JSON.stringify(feedback))}catch(e){$('message').textContent='请导出备份。'}};
+$('export').onclick=()=>{const value={schema:'basketball-failure-listening-v1',material_id:data.material_id,source_annotation_sha256:data.source_annotation_sha256,exported_utc:new Date().toISOString(),feedback};const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)+'\n'],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='basketball_failure_listening.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+load();
+</script></html>

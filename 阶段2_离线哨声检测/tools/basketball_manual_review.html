@@ -1,0 +1,61 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>篮球片段：人工单次哨声标注</title>
+<style>body{font:17px system-ui;max-width:1150px;margin:25px auto;padding:0 18px;line-height:1.6}button,input,select{font:inherit;padding:7px;margin:5px}audio{width:100%}canvas{width:100%;height:250px;border:1px solid #999;cursor:crosshair}video{max-width:600px;max-height:330px}table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid #ddd}.note{background:#eef3fa;padding:12px}#position{font-weight:bold}</style>
+<h1>篮球片段：人工单次哨声标注</h1>
+<p>原始浮点音轨未调整增益。播放器副本对全部文件和声道统一降低相同幅度，避免AAC解码幅值超过±1时新增16位削波；系数见片段信息。未独立拉平各段音量。</p>
+<p class="note">先完整试听各原声道，再标每次独立吹哨。页面没有模型分数或候选。跨声道同一声只标一次；本场／邻场身份须有画面或来源依据，拿不准选未知，不凭声音大小推断。小数时间是定位辅助，不要求人工毫秒精度。</p>
+<label>比赛片段<select id="file"></select></label><label>声道<select id="channel"></select></label><p id="info"></p>
+<audio id="audio" controls preload="metadata"></audio><p id="position"></p>
+<canvas id="wave" width="1200" height="280" aria-label="可点击定位的音频波形"></canvas>
+<button id="full">整段</button><button id="zoom5">当前位置附近5秒</button><button id="zoom2">当前位置附近2秒</button>
+<button id="back">后退0.01秒</button><button id="forward">前进0.01秒</button><button id="setStart">设为开始</button><button id="setEnd">设为结束</button>
+<p>Shift点击波形设置开始，Alt点击设置结束。绿线开始，红线结束；蓝线当前播放位置。横轴为解码音频秒数。</p>
+<label>开始秒<input id="start" type="number" step="0.001"></label><label>结束秒<input id="end" type="number" step="0.001"></label>
+<label>声音<select id="kind"><option value="whistle">可确认哨声</option><option value="uncertain">不确定声音</option></select></label>
+<label>来源<select id="identity"><option value="unverified">未知</option><option value="target_field_referee">本场裁判（有依据）</option><option value="neighbour_field">邻场（有依据）</option><option value="replay_or_added_audio">回放／后加音效</option></select></label>
+<label>边界截断<input id="clipped" type="checkbox"></label><p><label>来源依据／备注<input id="note" size="65"></label></p>
+<button id="preview">试听所选区间</button><button id="add">添加一条事件</button><p id="message" role="status"></p>
+<table><thead><tr><th>声音</th><th>开始～结束秒</th><th>来源</th><th>操作</th></tr></thead><tbody id="events"></tbody></table>
+<h2>完整复核</h2><div id="coverage"></div>
+<label><input id="context" type="checkbox">已检查本片段回放／解说／配乐及声音来源线索</label>
+<p><label>片段背景备注<input id="contextNote" size="75"></label></p>
+<details><summary>查看原视频辅助判断（浏览器可能不支持HEVC）</summary>
+<p>视频仅供画面和来源辅助，不自动播放或精确同步。若视频无法播放，用Windows默认应用打开下方原视频路径；音频标注仍以本页音轨为准。</p><p id="videoPath"></p><video id="video" controls preload="none"></video>
+<button id="videoSeek">视频跳转到当前音频位置（近似）</button></details>
+<p id="status"></p><button id="export">导出人工标注</button><label>导入已保存JSON<input id="import" type="file" accept=".json"></label>
+<p>下载文件名basketball_manual_annotations.json，可保存部分进度；离开前务必导出。本地缓存不替代文件备份。导出不会运行评价或改旧真值。</p>
+<script>
+const material=__DATA__,initial=__INITIAL__, $=id=>document.getElementById(id);
+const key=material.material_id, audio=$('audio'),canvas=$('wave'),ctx=canvas.getContext('2d');
+let state=JSON.parse(JSON.stringify(initial)),fi=0,channel=0,position=0,view=[0,1],stopAt=null,serial=0;
+function validate(s){
+ if(s.schema!==initial.schema||s.material_id!==initial.material_id||JSON.stringify(s.source_files)!==JSON.stringify(initial.source_files))throw Error('来源或材料不匹配。');
+ if(!Array.isArray(s.files)||s.files.length!==material.files.length||!Array.isArray(s.events))throw Error('文件覆盖记录不完整。');
+ const ids=new Set();for(const f of material.files){const r=s.files.filter(r=>r.id===f.id);if(r.length!==1||r[0].reviewed_channels.length!==f.channels||r[0].reviewed_channels.some(v=>typeof v!=='boolean')||typeof r[0].context_reviewed!=='boolean')throw Error('复核记录非法。')}
+ for(const e of s.events){const f=material.files.find(f=>f.id===e.file_id);if(!f||ids.has(e.id)||!Number.isInteger(e.start_sample)||!Number.isInteger(e.end_sample)||!(0<=e.start_sample&&e.start_sample<e.end_sample&&e.end_sample<=f.frames)||!Number.isInteger(e.reference_channel)||e.reference_channel<0||e.reference_channel>=f.channels||!['whistle','uncertain'].includes(e.kind)||!['unverified','target_field_referee','neighbour_field','replay_or_added_audio'].includes(e.source_identity))throw Error('事件区间或类别非法。');ids.add(e.id)}
+}
+try{const saved=localStorage.getItem(key);if(saved){const parsed=JSON.parse(saved);validate(parsed);state=parsed}}catch(e){$('message').textContent='缓存不可用或无法恢复，请使用JSON导入／导出。'}
+function save(){try{localStorage.setItem(key,JSON.stringify(state))}catch(e){$('message').textContent='缓存保存失败，请及时导出JSON。'}}
+function current(){return material.files[fi]}
+function review(){return state.files.find(r=>r.id===current().id)}
+function bound(){if($('start').value===''||$('end').value==='')throw Error('请先设置开始与结束。');const f=current(),a=Math.round(Number($('start').value)*f.rate),b=Math.round(Number($('end').value)*f.rate);if(!Number.isFinite(a)||!Number.isFinite(b)||!(0<=a&&a<b&&b<=f.frames))throw Error('起止超范围或顺序错误。');return[a,b]}
+function draw(){const f=current(),w=f.envelopes[channel],step=f.envelope_step/f.rate,a=view[0],b=view[1],scale=1200/(b-a);ctx.clearRect(0,0,1200,280);let peak=1e-6;for(let i=Math.floor(a/step);i<Math.min(w.length,Math.ceil(b/step));i++)peak=Math.max(peak,Math.abs(w[i][0]),Math.abs(w[i][1]));ctx.strokeStyle='#3569a8';ctx.beginPath();for(let i=Math.floor(a/step);i<Math.min(w.length,Math.ceil(b/step));i++){const x=(i*step-a)*scale;ctx.moveTo(x,125-100*w[i][0]/peak);ctx.lineTo(x,125-100*w[i][1]/peak)}ctx.stroke();for(let j=0;j<=5;j++){ctx.fillStyle='#333';ctx.fillText((a+(b-a)*j/5).toFixed(3)+'s',Math.min(1200*j/5,1130),270)}for(const [t,color] of [[position,'#0066cc'],[$('start').value,'#008844'],[$('end').value,'#cc2222']]){if(t==='')continue;ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo((Number(t)-a)*scale,0);ctx.lineTo((Number(t)-a)*scale,245);ctx.stroke()}$('position').textContent='当前音频位置 '+position.toFixed(3)+' 秒 / '+f.duration.toFixed(3)+' 秒'}
+function seek(t){audio.pause();stopAt=null;position=Math.max(0,Math.min(current().duration,t));audio.currentTime=position;draw()}
+function zoom(seconds){const duration=current().duration,n=Math.min(seconds,duration),a=Math.max(0,Math.min(position-n/2,duration-n));view=[a,a+n];draw()}
+function table(){const f=current(),body=$('events');body.innerHTML='';for(const e of state.events.filter(e=>e.file_id===f.id)){const row=document.createElement('tr');for(const value of [e.kind,(e.start_sample/f.rate).toFixed(3)+'～'+(e.end_sample/f.rate).toFixed(3),e.source_identity]){const cell=document.createElement('td');cell.textContent=value;row.appendChild(cell)}const cell=document.createElement('td'),button=document.createElement('button');button.textContent='删除';button.onclick=()=>{state.events=state.events.filter(x=>x.id!==e.id);save();table()};cell.appendChild(button);row.appendChild(cell);body.appendChild(row)}$('status').textContent='已完整试听 '+state.files.filter(r=>r.reviewed_channels.every(Boolean)).length+'/6 片段；事件 '+state.events.length+' 条（不是自动验收）。'}
+function loadChannel(keep){audio.pause();stopAt=null;position=keep;audio.onloadedmetadata=()=>{audio.currentTime=Math.min(keep,audio.duration);draw()};audio.src=current().audio[channel];draw()}
+function loadFile(){audio.pause();$('video').pause();channel=0;position=0;const f=current();view=[0,f.duration];$('channel').innerHTML='';for(let c=0;c<f.channels;c++){const option=document.createElement('option');option.value=c;option.textContent='C'+c;$('channel').appendChild(option)}$('start').value='';$('end').value='';$('note').value='';$('identity').value='unverified';$('clipped').checked=false;$('coverage').innerHTML='';review().reviewed_channels.forEach((v,c)=>{const label=document.createElement('label'),box=document.createElement('input');box.type='checkbox';box.checked=v;box.onchange=()=>{review().reviewed_channels[c]=box.checked;save();table()};label.appendChild(box);label.appendChild(document.createTextNode('已完整听过C'+c+'（含无哨声背景）'));$('coverage').appendChild(label)});$('context').checked=review().context_reviewed;$('contextNote').value=review().context_note;$('info').textContent=f.id+' · '+f.video_filename+' · '+f.rate+'Hz · '+f.channels+'声道 · 解码音频'+f.duration.toFixed(6)+'秒 · 统一试听系数'+f.playback_gain.toFixed(6);$('video').src=f.video_url;$('videoPath').textContent=f.video_path;loadChannel(0);table()}
+material.files.forEach((f,i)=>{const option=document.createElement('option');option.value=i;option.textContent=f.id+' · '+f.video_filename;$('file').appendChild(option)});
+$('file').onchange=()=>{fi=Number($('file').value);loadFile()};$('channel').onchange=()=>{channel=Number($('channel').value);loadChannel(position)};
+canvas.onclick=e=>{const r=canvas.getBoundingClientRect();seek(view[0]+(e.clientX-r.left)/r.width*(view[1]-view[0]));if(e.shiftKey)$('start').value=position.toFixed(6);if(e.altKey)$('end').value=position.toFixed(6);draw()};
+$('full').onclick=()=>{view=[0,current().duration];draw()};$('zoom5').onclick=()=>zoom(5);$('zoom2').onclick=()=>zoom(2);$('back').onclick=()=>seek(position-.01);$('forward').onclick=()=>seek(position+.01);
+$('setStart').onclick=()=>{$('start').value=position.toFixed(6);draw()};$('setEnd').onclick=()=>{$('end').value=position.toFixed(6);draw()};$('start').oninput=draw;$('end').oninput=draw;
+audio.ontimeupdate=()=>{position=audio.currentTime;if(stopAt!==null&&position>=stopAt){audio.pause();stopAt=null}draw()};
+$('preview').onclick=()=>{try{const[a,b]=bound();audio.currentTime=a/current().rate;position=audio.currentTime;stopAt=b/current().rate;audio.play().catch(e=>$('message').textContent=e.message)}catch(e){$('message').textContent=e.message}};
+$('add').onclick=()=>{try{const[a,b]=bound(),f=current();if(['target_field_referee','neighbour_field'].includes($('identity').value)&&!$('note').value.trim())throw Error('请填写本场／邻场身份依据；没有依据请选择未知。');const e={id:f.id+'-'+Date.now()+'-'+serial++,file_id:f.id,start_sample:a,end_sample:b,kind:$('kind').value,reference_channel:channel,source_identity:$('identity').value,boundary_clipped:$('clipped').checked,note:$('note').value,boundary_method:'human_audio_waveform_estimate'};state.events.push(e);save();table();$('message').textContent='已添加一条，请勿换声道重复添加同一次吹哨。'}catch(e){$('message').textContent=e.message}};
+$('context').onchange=()=>{review().context_reviewed=$('context').checked;save()};$('contextNote').oninput=()=>{review().context_note=$('contextNote').value;save()};
+$('videoSeek').onclick=()=>{try{$('video').currentTime=position+current().first_decoded_pts_seconds;$('message').textContent='仅近似定位，不能证明视频与音频精确同步。'}catch(e){$('message').textContent='请在Windows默认应用查看原视频。'}};
+function exportState(){validate(state);return{...state,exported_utc:new Date().toISOString(),complete_review:state.files.every(r=>r.reviewed_channels.every(Boolean)&&r.context_reviewed),uncertain_count:state.events.filter(e=>e.kind==='uncertain').length}}
+$('export').onclick=()=>{try{const url=URL.createObjectURL(new Blob([JSON.stringify(exportState(),null,2)+'\n'],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download='basketball_manual_annotations.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(e){$('message').textContent=e.message}};
+$('import').onchange=async()=>{try{const s=JSON.parse(await $('import').files[0].text());validate(s);state=s;save();loadFile();$('message').textContent='已导入，继续复核。'}catch(e){$('message').textContent='导入失败：'+e.message}};
+loadFile();
+</script></html>

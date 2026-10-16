@@ -1,0 +1,75 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>哨声候选人工纠错</title>
+<style>body{font:17px system-ui;max-width:1150px;margin:24px auto;padding:0 18px;line-height:1.6}button,input,select{font:inherit;padding:6px;margin:4px}canvas{width:100%;height:250px;border:1px solid #aaa;cursor:crosshair}audio{width:100%}table{width:100%;border-collapse:collapse}td,th{padding:7px;border-bottom:1px solid #ccc}.note{background:#eef3fa;padding:12px}.deleted{color:#888;text-decoration:line-through}#message{color:#a33}</style>
+<h1>哨声候选人工纠错</h1><p id="source"></p>
+<p class="note">原预测只读。修改只进入另存的纠错JSON；未确认记录是草稿。声音确认与裁判身份分开，未知身份不会自动确认。本页时间为原解码音轨相对秒数，无采集UTC。试听副本统一降低幅度，波形显示原浮点音轨。</p>
+<label>声道<select id="channel"></select></label><audio id="audio" controls preload="metadata"></audio><p id="position"></p>
+<canvas id="wave" width="1200" height="280"></canvas>
+<button id="full">整段波形</button><button id="zoom5">附近5秒</button><button id="zoom2">附近2秒</button>
+<button id="back">后退0.01秒</button><button id="forward">前进0.01秒</button><button id="setStart">设为开始</button><button id="setEnd">设为结束</button>
+<p>点击波形定位；Shift点击设开始，Alt点击设结束。绿线开始、红线结束、蓝线当前位置。</p>
+<label>当前记录<select id="selected"></select></label><button id="new">补充漏报（新记录）</button>
+<p><label>开始秒<input id="start" type="number" step="0.001"></label><label>结束秒<input id="end" type="number" step="0.001"></label></p>
+<label>身份<select id="identity"><option value="unverified">未知</option><option value="target_field_referee">本场裁判（有依据）</option><option value="neighbour_field">邻场（有依据）</option><option value="replay_or_added_audio">回放/后加声音（有依据）</option></select></label>
+<p><label>理由/身份依据<input id="note" size="70"></label></p>
+<p><label><input id="confirmed" type="checkbox">我已实听并确认本次纠错（未勾选则保存为待确认草稿）</label></p>
+<button id="preview">试听严格起止</button><button id="contextPlay">试听前后各1秒</button><button id="save">保存补充/修改/确认</button><button id="delete">删除误报（保留删除记录）</button>
+<p id="message" role="status"></p><p id="status"></p>
+<h2>纠错记录</h2><table><thead><tr><th>ID/原候选</th><th>相对秒数</th><th>状态</th><th>身份</th><th>操作</th></tr></thead><tbody id="corrected"></tbody></table>
+<details><summary>原预测（不可改；分数是模型输出，非校准概率）</summary><table><thead><tr><th>原ID</th><th>原起止</th><th>峰值分数</th></tr></thead><tbody id="original"></tbody></table></details>
+<p><button id="export">导出纠错JSON</button><label>重新导入<input id="import" type="file" accept=".json"></label></p>
+<p>导出文件另存，不用events.json或旧人工参考文件名。可以导出草稿；导入会校验输入/运行/原预测哈希、边界、操作重放和人工确认状态。浏览器缓存不是文件备份。重叠记录提示核查，不自动合并。删除后可导入此前导出的版本恢复。</p>
+<script>__CORE__</script>
+<script>
+'use strict';
+const material=__MATERIAL__,C=PCCorrections,$=id=>document.getElementById(id),audio=$('audio'),ctx=$('wave').getContext('2d');
+const key='pc-corrections-'+material.binding.run_sha256+'-'+material.binding.original_events_sha256;
+let state=C.initial(material),position=0,channel=0,view=[0,material.duration],selectedId=null,stopAt=null;
+try{const s=localStorage.getItem(key);if(s){const restored=JSON.parse(s);C.validate(restored,material);state=restored}}catch(e){$('message').textContent='缓存未恢复：'+e.message+'。可导入JSON。'}
+function cache(){try{localStorage.setItem(key,JSON.stringify(state))}catch(e){$('message').textContent='缓存保存失败，请导出JSON。'}}
+function error(e){$('message').textContent=e.message}
+function draw(){const w=material.envelopes[channel],step=material.envelope_step/material.binding.rate,[a,b]=view,scale=1200/(b-a);ctx.clearRect(0,0,1200,280);let peak=1e-6;
+ for(let i=Math.floor(a/step);i<Math.min(w.length,Math.ceil(b/step));i++)peak=Math.max(peak,Math.abs(w[i][0]),Math.abs(w[i][1]));
+ ctx.strokeStyle='#3569a8';ctx.beginPath();for(let i=Math.floor(a/step);i<Math.min(w.length,Math.ceil(b/step));i++){const x=(i*step-a)*scale;ctx.moveTo(x,125-100*w[i][0]/peak);ctx.lineTo(x,125-100*w[i][1]/peak)}ctx.stroke();
+ for(let j=0;j<=5;j++)ctx.fillText((a+(b-a)*j/5).toFixed(3)+'s',Math.min(1200*j/5,1130),270);
+ for(const[t,color]of [[position,'#06c'],[$('start').value,'#084'],[$('end').value,'#c22']]){if(t==='')continue;ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo((Number(t)-a)*scale,0);ctx.lineTo((Number(t)-a)*scale,245);ctx.stroke()}
+ $('position').textContent='相对位置 '+position.toFixed(3)+' / '+material.duration.toFixed(3)+' 秒';
+}
+function seek(t){audio.pause();stopAt=null;position=Math.max(0,Math.min(material.duration,t));audio.currentTime=position;draw()}
+function loadChannel(){audio.pause();stopAt=null;const keep=position;audio.onloadedmetadata=()=>{audio.currentTime=Math.min(keep,audio.duration);draw()};audio.src=material.playback[channel];draw()}
+function zoom(n){n=Math.min(n,material.duration);const a=Math.max(0,Math.min(position-n/2,material.duration-n));view=[a,a+n];draw()}
+function select(id){selectedId=id;const e=state.events.find(e=>e.id===id);$('selected').value=id||'';
+ $('start').value=e?(e.start_sample/material.binding.rate).toFixed(9):'';$('end').value=e?(e.end_sample/material.binding.rate).toFixed(9):'';
+ $('identity').value=e?e.source_identity:'unverified';$('note').value=e?e.note:'';$('confirmed').checked=e?e.review_status==='confirmed':false;
+ if(e){channel=e.reference_channel;$('channel').value=String(channel);position=Math.max(0,e.start_sample/material.binding.rate-1);loadChannel()}draw();
+}
+function refresh(){const sel=$('selected');sel.innerHTML='';const empty=document.createElement('option');empty.value='';empty.textContent='新补充记录';sel.appendChild(empty);
+ const body=$('corrected');body.innerHTML='';for(const e of state.events){if(!e.deleted){const o=document.createElement('option');o.value=e.id;o.textContent=e.id;sel.appendChild(o)}
+  const row=document.createElement('tr');if(e.deleted)row.className='deleted';
+  for(const text of [e.id+' / '+(e.origin_event_id===null?'人工补充':e.origin_event_id),(e.start_sample/material.binding.rate).toFixed(6)+'～'+(e.end_sample/material.binding.rate).toFixed(6),(e.deleted?'删除 / ':'')+e.review_status,e.source_identity]){const td=document.createElement('td');td.textContent=text;row.appendChild(td)}
+  const cell=document.createElement('td');if(!e.deleted){const b=document.createElement('button');b.textContent='查看/编辑';b.onclick=()=>select(e.id);cell.appendChild(b)}row.appendChild(cell);body.appendChild(row);
+ }
+ const s=C.inspect(state,material);$('status').textContent='保留 '+s.live_events+' 条；删除 '+s.deleted+' 条；待确认 '+s.pending+' 条；操作 '+state.operations.length+' 次。'+(s.overlaps.length?'重叠待核查：'+s.overlaps.map(x=>x.join('/')).join('，'):'无重叠。');
+}
+function fields(){if($('start').value===''||$('end').value==='')throw Error('先设置起止');const rate=material.binding.rate;return {start_sample:Math.round(Number($('start').value)*rate),end_sample:Math.round(Number($('end').value)*rate),reference_channel:channel,source_identity:$('identity').value,note:$('note').value,review_status:$('confirmed').checked?'confirmed':'pending'}}
+function commit(){const f=fields(),e=state.events.find(e=>e.id===selectedId);let action='add',id='manual-'+(state.operations.length+1);
+ if(e){action=e.start_sample===f.start_sample&&e.end_sample===f.end_sample&&e.reference_channel===f.reference_channel?'confirm':'modify';id=e.id}
+ state=C.apply(state,material,action,id,f);cache();refresh();select(id);$('message').textContent='已保存'+action+'；原预测不变。请导出文件备份。';
+}
+function play(withContext){const f=fields();if(!(0<=f.start_sample&&f.start_sample<f.end_sample&&f.end_sample<=material.binding.frames))throw Error('起止非法');audio.pause();position=Math.max(0,f.start_sample/material.binding.rate-(withContext?1:0));audio.currentTime=position;stopAt=Math.min(material.duration,f.end_sample/material.binding.rate+(withContext?1:0));draw();audio.play().catch(error)}
+$('source').textContent=material.binding.input_path+' · '+material.binding.rate+'Hz/'+material.binding.channels+'声道 · 0.65/v1 · 输入SHA256 '+material.binding.input_sha256;
+for(let c=0;c<material.binding.channels;c++){const o=document.createElement('option');o.value=c;o.textContent='C'+c;$('channel').appendChild(o)}
+for(const p of material.predictions){const row=document.createElement('tr');for(const text of [p.event_id,p.estimated_start_seconds.toFixed(6)+'～'+p.estimated_end_seconds.toFixed(6),p.peak_score.toFixed(6)]){const td=document.createElement('td');td.textContent=text;row.appendChild(td)}$('original').appendChild(row)}
+$('selected').onchange=()=>select($('selected').value||null);$('new').onclick=()=>select(null);
+$('channel').onchange=()=>{channel=Number($('channel').value);$('confirmed').checked=false;loadChannel()};
+$('wave').onclick=e=>{const r=$('wave').getBoundingClientRect();seek(view[0]+(e.clientX-r.left)/r.width*(view[1]-view[0]));if(e.shiftKey){$('start').value=position.toFixed(9);$('confirmed').checked=false}if(e.altKey){$('end').value=position.toFixed(9);$('confirmed').checked=false}draw()};
+$('full').onclick=()=>{view=[0,material.duration];draw()};$('zoom5').onclick=()=>zoom(5);$('zoom2').onclick=()=>zoom(2);$('back').onclick=()=>seek(position-.01);$('forward').onclick=()=>seek(position+.01);
+$('setStart').onclick=()=>{$('start').value=position.toFixed(9);$('confirmed').checked=false;draw()};$('setEnd').onclick=()=>{$('end').value=position.toFixed(9);$('confirmed').checked=false;draw()};
+for(const id of ['start','end','identity','note'])$(id).oninput=()=>{$('confirmed').checked=false;draw()};
+audio.ontimeupdate=()=>{position=audio.currentTime;if(stopAt!==null&&position>=stopAt){audio.pause();stopAt=null}draw()};
+$('preview').onclick=()=>{try{play(false)}catch(e){error(e)}};$('contextPlay').onclick=()=>{try{play(true)}catch(e){error(e)}};
+$('save').onclick=()=>{try{commit()}catch(e){error(e)}};
+$('delete').onclick=()=>{try{if(!selectedId)throw Error('先选择要删除的候选');if(!$('note').value.trim())throw Error('请填写删除理由');state=C.apply(state,material,'delete',selectedId,{note:$('note').value,review_status:$('confirmed').checked?'confirmed':'pending'});cache();refresh();select(null);$('message').textContent='删除记录已保存，原预测不变。'}catch(e){error(e)}};
+$('export').onclick=()=>{try{const s=C.exportState(state,material),url=URL.createObjectURL(new Blob([JSON.stringify(s,null,2)+'\n'],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download='whistle_corrections_'+material.binding.run_sha256.slice(0,12)+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('message').textContent='已导出；'+(s.complete_review?'所有记录有人工确认。':'仍有待确认记录，不能当完整真值。')}catch(e){error(e)}};
+$('import').onchange=async()=>{try{const incoming=JSON.parse(await $('import').files[0].text());C.validate(incoming,material);state=incoming;cache();refresh();select(state.events.find(e=>!e.deleted)?.id||null);$('message').textContent='重新导入校验通过，原预测仍只读。'}catch(e){error(e)}};
+refresh();select(state.events[0]?.id||null);loadChannel();
+</script></html>

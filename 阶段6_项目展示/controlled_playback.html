@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>短会话播放核查</title>
+<style>body{font:18px system-ui;max-width:900px;margin:30px auto;padding:0 20px}video{width:100%;background:#111}button{font:inherit;padding:12px;margin:12px 12px 12px 0}#state{white-space:pre-wrap}</style>
+<h1>短会话播放核查</h1>
+<p>先在板卡终端按空格开始采集，再点击下方按钮。视频从0开始，最多播放10秒。保持电脑扬声器开启。</p>
+<video id="video" preload="auto" src="/preview.mp4" playsinline></video>
+<button id="start" disabled>从0开始播放并记录</button><button id="stop" disabled>停止播放</button>
+<p id="state">正在加载视频。此页面不控制板卡采集。</p>
+<p>记录仅用于软件位置核查。声音输出及传播延迟未知，不代表精确采样UTC或相机同步。</p>
+<script>
+const video=document.querySelector('#video'),start=document.querySelector('#start'),stop=document.querySelector('#stop'),state=document.querySelector('#state');
+let active=false,used=false,queue=Promise.resolve(),timer,deadline,failed=false,sequence=0;
+function record(kind){
+  const row={kind,sequence:++sequence,wall_ms:Date.now(),performance_ms:performance.now(),media_seconds:video.currentTime,rate:video.playbackRate,paused:video.paused,ready_state:video.readyState};
+  queue=queue.then(async()=>{
+    const response=await fetch('/playback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(row)});
+    if(!response.ok)throw Error('记录未保存');
+  }).catch(error=>{failed=true;video.pause();active=false;clearInterval(timer);clearTimeout(deadline);stop.disabled=true;state.textContent='记录失败，已停止播放。保留现场，请返回聊天。';});
+}
+function finish(reason){
+  if(!active)return;
+  active=false;clearInterval(timer);clearTimeout(deadline);video.pause();stop.disabled=true;record(reason);
+  queue.then(()=>{if(!failed)state.textContent='播放已停止，记录已保存。等待板卡收尾，再核对标签提交、电脑确认和片段；closed只表示采集生命周期结束。';});
+}
+video.addEventListener('canplay',()=>{if(!used)start.disabled=false;state.textContent=used?state.textContent:'视频已就绪。先在板卡按空格，再点击开始播放。';});
+video.addEventListener('error',()=>{finish('media_error');state.textContent='视频加载或播放失败，请返回聊天。';});
+for(const kind of ['playing','waiting','stalled','seeking','seeked','ratechange','pause'])video.addEventListener(kind,()=>{if(active)record(kind);});
+video.addEventListener('ended',()=>finish('ended'));
+start.onclick=async()=>{
+  if(used)return;
+  used=true;start.disabled=true;video.currentTime=0;video.playbackRate=1;active=true;record('begin');
+  try{await queue;if(failed)return;await video.play();stop.disabled=false;state.textContent='正在播放并记录，10秒后自动停止。';timer=setInterval(()=>record('sample'),100);deadline=setTimeout(()=>finish('limit_stop'),10000);}
+  catch(error){finish('play_error');}
+};
+stop.onclick=()=>finish('user_stop');
+window.addEventListener('pagehide',()=>{if(active){video.pause();navigator.sendBeacon('/playback',JSON.stringify({kind:'page_closed',sequence:++sequence,wall_ms:Date.now(),performance_ms:performance.now(),media_seconds:video.currentTime,rate:video.playbackRate,paused:true,ready_state:video.readyState}));}});
+</script></html>
